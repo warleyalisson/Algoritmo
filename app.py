@@ -10,27 +10,25 @@ from sklearn.metrics import r2_score, mean_absolute_error
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🔬 Validador Inteligente de Composição Proximal com Estatística Científica")
+st.title("🔬 Validador Inteligente de Composição Proximal com Estatística Científica Avançada")
 
 st.markdown("""
-Este sistema aplica modelos de IA para correção e validação de dados de composição proximal de alimentos,
-considerando os parâmetros: **umidade, proteínas, cinzas, lipídeos, fibras e carboidratos** (calculado por diferença).
+Este sistema aplica modelos de IA para correção e validação de dados de composição proximal de alimentos, considerando:
+**umidade, proteínas, cinzas, lipídeos, fibras e carboidratos** (calculado por diferença).
 
-**Variações esperadas em estudos laboratoriais**:
-- 🟢 **±2%**: Alta precisão (padrão ouro – controle de qualidade rigoroso)
-- 🟡 **±5%**: Precisão aceitável para estudos acadêmicos
-- 🔴 **±10% ou mais**: Dados inconsistentes ou com alto risco de erro
+### 📏 Variações esperadas:
+- 🟢 ±2%: Alta precisão (controle de qualidade rigoroso)
+- 🟡 ±5%: Precisão acadêmica aceitável
+- 🔴 >10%: Dados inconsistentes
 
-**Métricas estatísticas apresentadas**:
-- Média original e corrigida
-- Desvio padrão
-- Variação percentual média
-- Coloração automática (verde, amarelo, vermelho)
-
+### 📊 Indicadores apresentados:
+- Média, desvio padrão e coeficiente de variação (CV%)
+- Erro médio absoluto
+- Coloração condicional: verde (ok), amarelo (aceitável), vermelho (alerta)
 """)
 
-alvo_file = st.file_uploader("📂 Arquivo com os dados a corrigir:", type="csv")
-ref_file = st.file_uploader("📘 Base de referência com *_ref:", type="csv")
+alvo_file = st.file_uploader("📂 Dados a Corrigir (CSV):", type="csv")
+ref_file = st.file_uploader("📘 Base de Referência (CSV):", type="csv")
 
 if alvo_file and ref_file:
     df_alvo = pd.read_csv(alvo_file)
@@ -43,7 +41,7 @@ if alvo_file and ref_file:
         if all(col in df.columns for col in col_base):
             df["carboidratos"] = 100 - df[col_base].sum(axis=1)
         else:
-            st.error(f"❌ Faltam colunas obrigatórias: {', '.join(col_base)}.")
+            st.error("❌ Faltam colunas obrigatórias.")
             st.stop()
 
     for col in col_base + ["carboidratos"]:
@@ -55,60 +53,39 @@ if alvo_file and ref_file:
         y_ref = df_ref[[c + "_ref" for c in col_base + ["carboidratos"]]]
         X_alvo = df_alvo[col_base + ["carboidratos"]]
 
-        df_resultado = df_alvo.copy()
-        resultados = {}
-
         # Modelos
-        lr = LinearRegression().fit(X_ref, y_ref)
-        dt = DecisionTreeRegressor(random_state=0).fit(X_ref, y_ref)
         scalerX, scalerY = StandardScaler().fit(X_ref), StandardScaler().fit(y_ref)
-        mlp = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=0, early_stopping=True)
+        mlp = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=1000, early_stopping=True, random_state=0)
         mlp.fit(scalerX.transform(X_ref), scalerY.transform(y_ref))
+        y_pred_corr = scalerY.inverse_transform(mlp.predict(scalerX.transform(X_alvo)))
 
-        y_preds = {
-            "Regressão Linear": lr.predict(X_alvo),
-            "Árvore de Decisão": dt.predict(X_alvo),
-            "Rede Neural (MLP)": scalerY.inverse_transform(mlp.predict(scalerX.transform(X_alvo)))
-        }
-
-        scores = {
-            nome: r2_score(y_ref, pred)
-            for nome, pred in {
-                "Regressão Linear": lr.predict(X_ref),
-                "Árvore de Decisão": dt.predict(X_ref),
-                "Rede Neural (MLP)": scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref)))
-            }.items()
-        }
-
-        melhor = max(scores, key=scores.get)
-        st.success(f"🏆 Melhor modelo com base no R²: **{melhor}**")
-        y_corrigido = y_preds[melhor]
-
-        df_corrigido = pd.DataFrame(y_corrigido, columns=col_corrigido)
-        df_final = pd.concat([df_alvo, df_corrigido], axis=1)
+        df_resultado = df_alvo.copy()
+        df_corrigido = pd.DataFrame(y_pred_corr, columns=col_corrigido)
+        df_final = pd.concat([df_resultado, df_corrigido], axis=1)
 
         for c in col_base + ["carboidratos"]:
             df_final[c + "_var_%"] = ((df_final[c + "_corr"] - df_final[c]) / df_final[c]) * 100
 
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("📂 Dados Originais")
+            st.markdown("## 📂 Dados Originais")
             st.dataframe(df_alvo)
         with col2:
-            st.subheader("📘 Base de Referência")
+            st.markdown("## 📘 Base de Referência")
             st.dataframe(df_ref)
 
-        st.subheader("✅ Dados Corrigidos")
+        st.markdown("## ✅ Dados Corrigidos")
         st.dataframe(df_corrigido)
 
-        # Estatísticas ampliadas
-        st.subheader("📊 Estatísticas Analíticas Comparativas")
+        st.markdown("## 📊 Estatísticas Analíticas Comparativas")
         estat = pd.DataFrame()
         for col in col_base + ["carboidratos"]:
             estat.loc[col, "Média Original"] = df_final[col].mean()
             estat.loc[col, "Desvio Original"] = df_final[col].std()
             estat.loc[col, "Média Corrigida"] = df_final[col + "_corr"].mean()
             estat.loc[col, "Desvio Corrigido"] = df_final[col + "_corr"].std()
+            estat.loc[col, "Erro Médio Absoluto"] = abs(df_final[col + "_corr"] - df_final[col]).mean()
+            estat.loc[col, "CV Corrigido (%)"] = 100 * estat.loc[col, "Desvio Corrigido"] / estat.loc[col, "Média Corrigida"]
             estat.loc[col, "Variação Média (%)"] = df_final[col + "_var_%"].mean()
 
         def cor_variacao(val):
@@ -119,9 +96,30 @@ if alvo_file and ref_file:
             else:
                 return "background-color: tomato"
 
-        st.dataframe(estat.style.applymap(cor_variacao, subset=["Variação Média (%)"]).format("{:.2f}"))
+        st.dataframe(estat.style
+                     .applymap(cor_variacao, subset=["Variação Média (%)"])
+                     .format("{:.2f}"))
 
-        st.download_button("⬇️ Baixar Resultado Final", df_final.to_csv(index=False), file_name="resultado_avaliado.csv")
+        st.markdown("## 📈 Comparação Visual")
+        fig = px.bar(estat.reset_index(), x='index', y=["Média Original", "Média Corrigida"], barmode="group")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("## 📝 Resumo Técnico")
+        media_erro = estat["Erro Médio Absoluto"].mean()
+        media_var = estat["Variação Média (%)"].mean()
+        if media_var < 2:
+            qualidade = "excelente precisão (nível de controle laboratorial)"
+        elif media_var < 5:
+            qualidade = "boa precisão dentro do esperado em pesquisas"
+        else:
+            qualidade = "alta variação, recomenda-se revisão dos dados originais"
+
+        st.info(f"O modelo corrigiu os dados com média de erro absoluto de {media_erro:.2f} e variação média de {media_var:.2f}%. "
+                f"Essa correção representa {qualidade}.")
+
+        # Downloads
+        st.download_button("⬇️ Baixar Dados Corrigidos", df_final.to_csv(index=False), file_name="resultado_corrigido.csv")
+        st.download_button("⬇️ Baixar Estatísticas", estat.to_csv(index=True), file_name="estatisticas.csv")
 
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
