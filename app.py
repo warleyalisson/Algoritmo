@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -25,12 +24,15 @@ if alvo_file and ref_file:
     col_corrigido = ["umidade_corr", "proteina_corr", "cinzas_corr", "lipideos_corr", "carboidratos_corr"]
     col_y = ["umidade_ref", "proteina_ref", "cinzas_ref", "lipideos_ref", "carboidratos_ref"]
 
-    # Calcular carboidratos por diferença, se não existir
+    # Verifica se as colunas existem antes de calcular carboidratos
     for df in [df_alvo, df_ref]:
-        if "carboidratos" not in df.columns:
-            df["carboidratos"] = 100 - (df["umidade"] + df["proteina"] + df["cinzas"] + df["lipideos"])
-        if "carboidratos_ref" not in df.columns and "carboidratos" in df.columns:
-            df["carboidratos_ref"] = df["carboidratos"]
+        required_cols = ["umidade", "proteina", "cinzas", "lipideos"]
+        if all(col in df.columns for col in required_cols):
+            if "carboidratos" not in df.columns:
+                df["carboidratos"] = 100 - (df["umidade"] + df["proteina"] + df["cinzas"] + df["lipideos"])
+        else:
+            st.error(f"❌ Arquivo está incompleto. As colunas obrigatórias são: {', '.join(required_cols)}.")
+            st.stop()
 
     try:
         X_ref = df_ref[col_base + ["carboidratos"]]
@@ -38,8 +40,6 @@ if alvo_file and ref_file:
         X_alvo = df_alvo[col_base + ["carboidratos"]]
 
         df_resultado = df_alvo.copy()
-
-        # Modelos e resultados
         resultados = {}
 
         # Regressão Linear
@@ -82,13 +82,15 @@ if alvo_file and ref_file:
         y_corrigido_df = pd.DataFrame(y_corrigido, columns=col_corrigido)
         df_resultado = pd.concat([df_resultado, y_corrigido_df], axis=1)
 
-        # Variação percentual e Z-score
+        # Cálculo de variação e zscore
         for i, col in enumerate(["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]):
             col_corr = col + "_corr"
             df_resultado[col + "_var_%"] = ((df_resultado[col_corr] - df_resultado[col]) / df_resultado[col]) * 100
             df_resultado[col + "_zscore"] = np.abs((df_resultado[col + "_var_%"] - df_resultado[col + "_var_%"].mean()) / df_resultado[col + "_var_%"].std())
 
-        st.dataframe(df_resultado.style.highlight_between(subset=[c+"_zscore" for c in col_base + ["carboidratos"]], left=2, right=100, color='tomato'))
+        st.dataframe(df_resultado.style.highlight_between(
+            subset=[c+"_zscore" for c in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]],
+            left=2, right=100, color='tomato'))
 
         # Gráficos
         st.markdown("### 📈 Gráficos Comparativos")
