@@ -5,6 +5,7 @@ from linear_regression import treinar_modelo as treinar_linear
 from mlp_regression import treinar_modelo as treinar_mlp
 from decision_tree import treinar_modelo as treinar_tree
 from sklearn.metrics import r2_score, mean_absolute_error
+import plotly.express as px
 
 st.set_page_config(page_title="Validador IA de Dados da Araruta", layout="wide")
 st.title("🧠 Validação Inteligente de Dados Nutricionais da Araruta")
@@ -67,11 +68,14 @@ if alvo_file and referencia_files:
                 r2 = r2_score(y_ref, modelo.predict(X_ref))
                 mae = mean_absolute_error(y_ref, modelo.predict(X_ref))
 
+            # Resultado e cálculo de variação
             df_corrigido = pd.DataFrame(y_pred, columns=["umidade_corr", "proteina_corr", "cinzas_corr", "fibras_corr"])
             df_resultado = pd.concat([df_alvo, df_corrigido], axis=1)
+            for col in col_X:
+                df_resultado[col + "_var_%"] = ((df_resultado[col + "_corr"] - df_resultado[col]) / df_resultado[col]) * 100
 
             st.success("✅ Dados corrigidos com sucesso!")
-            
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("### 📂 Dados a Corrigir")
@@ -83,10 +87,16 @@ if alvo_file and referencia_files:
 
             with col3:
                 st.markdown("### ✅ Resultado Corrigido")
-                st.dataframe(df_corrigido)
+                st.dataframe(df_resultado)
 
             st.markdown(f"**🔍 R² do modelo (base de referência):** `{r2:.3f}`")
             st.markdown(f"**📉 Erro médio absoluto (MAE):** `{mae:.3f}`")
+
+            st.markdown("### 📈 Gráficos Comparativos (Original vs Corrigido)")
+            for var in col_X:
+                fig = px.scatter(df_resultado, x=var, y=var + "_corr", title=f"Correção de {var.capitalize()}",
+                                 labels={var: "Original", var + "_corr": "Corrigido"})
+                st.plotly_chart(fig, use_container_width=True)
 
             st.download_button("⬇️ Baixar resultado corrigido", df_resultado.to_csv(index=False), file_name="resultado_corrigido.csv")
 
