@@ -1,106 +1,106 @@
-
 import streamlit as st
 import pandas as pd
-from linear_regression import treinar_modelo as treinar_linear
-from mlp_regression import treinar_modelo as treinar_mlp
-from decision_tree import treinar_modelo as treinar_tree
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score, mean_absolute_error
 import plotly.express as px
 
-st.set_page_config(page_title="Validador IA de Dados da Araruta", layout="wide")
-st.title("🧠 Validação Inteligente de Dados Nutricionais da Araruta")
+st.set_page_config(layout="wide")
+st.title("🔬 Sistema Inteligente para Validação de Dados Nutricionais – Araruta")
 
-st.markdown("### 📥 Envie seus arquivos:")
-alvo_file = st.file_uploader("📄 Arquivo com os dados a serem corrigidos (dados_alvo.csv):", type="csv")
-referencia_files = st.file_uploader("📁 Arquivo(s) com bases de referência (com valores padrão):", type="csv", accept_multiple_files=True)
-modelo_opcao = st.selectbox("🧠 Escolha o modelo de IA:", ["Regressão Linear", "Rede Neural (MLP)", "Árvore de Decisão"])
+st.markdown("Envie os **dados a corrigir** e a **base de referência** contendo os valores padrão.")
 
-if alvo_file and referencia_files:
+alvo_file = st.file_uploader("📂 Arquivo com os dados a corrigir:", type="csv")
+ref_file = st.file_uploader("📘 Base de referência com *_ref:", type="csv")
+
+if alvo_file and ref_file:
+    df_alvo = pd.read_csv(alvo_file)
+    df_ref = pd.read_csv(ref_file)
+
+    col_X = ["umidade", "proteina", "cinzas", "fibras"]
+    col_y = ["umidade_ref", "proteina_ref", "cinzas_ref", "fibras_ref"]
+
     try:
-        df_alvo = pd.read_csv(alvo_file)
-        dfs_referencia = [pd.read_csv(ref) for ref in referencia_files]
-        df_referencia = pd.concat(dfs_referencia, ignore_index=True)
+        X_ref = df_ref[col_X]
+        y_ref = df_ref[col_y]
+        X_alvo = df_alvo[col_X]
 
-        col_X = ["umidade", "proteina", "cinzas", "fibras"]
-        col_y = ["umidade_ref", "proteina_ref", "cinzas_ref", "fibras_ref"]
+        df_resultado = df_alvo.copy()
 
-        if not all(col in df_alvo.columns for col in col_X):
-            st.error("⚠️ O arquivo alvo deve conter as colunas: umidade, proteina, cinzas, fibras.")
-        elif not all(col in df_referencia.columns for col in col_X + col_y):
-            st.error("⚠️ As bases de referência devem conter as colunas: umidade, proteina, cinzas, fibras e *_ref.")
-        else:
-            if df_alvo.isnull().values.any():
-                st.warning("⚠️ Dados ausentes encontrados no arquivo alvo. Linhas incompletas serão descartadas.")
-                df_alvo = df_alvo.dropna()
+        # Modelos e resultados
+        resultados = {}
 
-            if df_referencia.isnull().values.any():
-                st.warning("⚠️ Dados ausentes nas referências. Linhas incompletas foram removidas.")
-                df_referencia = df_referencia.dropna()
+        # Regressão Linear
+        lr = LinearRegression().fit(X_ref, y_ref)
+        y_lr = lr.predict(X_alvo)
+        resultados["Regressão Linear"] = {
+            "modelo": lr,
+            "y_pred": y_lr,
+            "R²": r2_score(y_ref, lr.predict(X_ref)),
+            "MAE": mean_absolute_error(y_ref, lr.predict(X_ref))
+        }
 
-            try:
-                df_alvo[col_X] = df_alvo[col_X].astype(float)
-                df_referencia[col_X + col_y] = df_referencia[col_X + col_y].astype(float)
-            except ValueError:
-                st.error("❌ Detecção de células com texto ou dados inválidos. Corrija os arquivos e envie novamente.")
-                st.stop()
+        # Árvore de Decisão
+        dt = DecisionTreeRegressor(random_state=0).fit(X_ref, y_ref)
+        y_dt = dt.predict(X_alvo)
+        resultados["Árvore de Decisão"] = {
+            "modelo": dt,
+            "y_pred": y_dt,
+            "R²": r2_score(y_ref, dt.predict(X_ref)),
+            "MAE": mean_absolute_error(y_ref, dt.predict(X_ref))
+        }
 
-            X_ref = df_referencia[col_X]
-            y_ref = df_referencia[col_y]
-            X_alvo = df_alvo[col_X]
+        # Rede Neural MLP
+        scalerX = StandardScaler().fit(X_ref)
+        scalerY = StandardScaler().fit(y_ref)
+        mlp = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=0, early_stopping=True)
+        mlp.fit(scalerX.transform(X_ref), scalerY.transform(y_ref))
+        y_mlp = scalerY.inverse_transform(mlp.predict(scalerX.transform(X_alvo)))
+        resultados["Rede Neural (MLP)"] = {
+            "modelo": mlp,
+            "y_pred": y_mlp,
+            "R²": r2_score(y_ref, scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref)))),
+            "MAE": mean_absolute_error(y_ref, scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref))))
+        }
 
-            if modelo_opcao == "Regressão Linear":
-                modelo = treinar_linear(X_ref, y_ref)
-                y_pred = modelo.predict(X_alvo)
-                r2 = r2_score(y_ref, modelo.predict(X_ref))
-                mae = mean_absolute_error(y_ref, modelo.predict(X_ref))
+        # Escolher melhor modelo
+        melhor_modelo = max(resultados, key=lambda m: resultados[m]["R²"])
+        st.success(f"🏆 Melhor modelo com base no R²: **{melhor_modelo}**")
 
-            elif modelo_opcao == "Rede Neural (MLP)":
-                modelo, scalerX, scalerY = treinar_mlp(X_ref, y_ref)
-                X_alvo_scaled = scalerX.transform(X_alvo)
-                y_pred_scaled = modelo.predict(X_alvo_scaled)
-                y_pred = scalerY.inverse_transform(y_pred_scaled)
-                r2 = r2_score(y_ref, scalerY.inverse_transform(modelo.predict(scalerX.transform(X_ref))))
-                mae = mean_absolute_error(y_ref, scalerY.inverse_transform(modelo.predict(scalerX.transform(X_ref))))
+        # Aplicar e exibir
+        y_corrigido = resultados[melhor_modelo]["y_pred"]
+        y_corrigido_df = pd.DataFrame(y_corrigido, columns=["umidade_corr", "proteina_corr", "cinzas_corr", "fibras_corr"])
+        df_resultado = pd.concat([df_resultado, y_corrigido_df], axis=1)
 
-            elif modelo_opcao == "Árvore de Decisão":
-                modelo = treinar_tree(X_ref, y_ref)
-                y_pred = modelo.predict(X_alvo)
-                r2 = r2_score(y_ref, modelo.predict(X_ref))
-                mae = mean_absolute_error(y_ref, modelo.predict(X_ref))
+        # Variação percentual e Z-score
+        for col in col_X:
+            col_corr = col + "_corr"
+            df_resultado[col + "_var_%"] = ((df_resultado[col_corr] - df_resultado[col]) / df_resultado[col]) * 100
+            df_resultado[col + "_zscore"] = np.abs((df_resultado[col + "_var_%"] - df_resultado[col + "_var_%"].mean()) / df_resultado[col + "_var_%"].std())
 
-            # Resultado e cálculo de variação
-            df_corrigido = pd.DataFrame(y_pred, columns=["umidade_corr", "proteina_corr", "cinzas_corr", "fibras_corr"])
-            df_resultado = pd.concat([df_alvo, df_corrigido], axis=1)
-            for col in col_X:
-                df_resultado[col + "_var_%"] = ((df_resultado[col + "_corr"] - df_resultado[col]) / df_resultado[col]) * 100
+        st.dataframe(df_resultado.style
+                     .highlight_between(subset=[c+"_zscore" for c in col_X], left=2, right=100, color='tomato'))
 
-            st.success("✅ Dados corrigidos com sucesso!")
+        # Gráficos interativos
+        st.markdown("### 📈 Comparativo Visual")
+        for col in col_X:
+            fig = px.scatter(df_resultado, x=col, y=col + "_corr", title=f"Correção de {col.capitalize()}",
+                             labels={col: "Original", col + "_corr": "Corrigido"})
+            st.plotly_chart(fig, use_container_width=True)
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown("### 📂 Dados a Corrigir")
-                st.dataframe(df_alvo)
+        # Métricas
+        st.markdown("### 📊 Desempenho dos Modelos")
+        st.table(pd.DataFrame({
+            modelo: {
+                "R²": f"{res['R²']:.3f}",
+                "MAE": f"{res['MAE']:.3f}"
+            } for modelo, res in resultados.items()
+        }).T)
 
-            with col2:
-                st.markdown("### 📘 Base de Referência")
-                st.dataframe(df_referencia)
-
-            with col3:
-                st.markdown("### ✅ Resultado Corrigido")
-                st.dataframe(df_resultado)
-
-            st.markdown(f"**🔍 R² do modelo (base de referência):** `{r2:.3f}`")
-            st.markdown(f"**📉 Erro médio absoluto (MAE):** `{mae:.3f}`")
-
-            st.markdown("### 📈 Gráficos Comparativos (Original vs Corrigido)")
-            for var in col_X:
-                fig = px.scatter(df_resultado, x=var, y=var + "_corr", title=f"Correção de {var.capitalize()}",
-                                 labels={var: "Original", var + "_corr": "Corrigido"})
-                st.plotly_chart(fig, use_container_width=True)
-
-            st.download_button("⬇️ Baixar resultado corrigido", df_resultado.to_csv(index=False), file_name="resultado_corrigido.csv")
+        st.download_button("⬇️ Baixar resultado corrigido", df_resultado.to_csv(index=False), file_name="resultado_analitico.csv")
 
     except Exception as e:
-        st.error(f"❌ Erro ao processar os arquivos: {e}")
-else:
-    st.info("📂 Aguardando envio dos dois arquivos...")
+        st.error(f"Erro no processamento: {e}")
