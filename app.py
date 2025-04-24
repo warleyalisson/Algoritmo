@@ -6,13 +6,23 @@ from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🔬 Validador IA – Composição Proximal com Fibras e Estatísticas")
+st.title("🔬 Validador IA – Composição Proximal com Fibras e Análise Científica")
 
-st.markdown("Envie os **dados a corrigir** e a **base de referência** com *_ref.")
+st.markdown("""
+Este sistema foi desenvolvido para validar automaticamente análises bromatológicas
+relacionadas à **araruta (Maranta arundinacea)** e similares.  
+Inclui análise de: `Umidade`, `Proteína`, `Cinzas`, `Lipídeos`, `Fibras`, `Carboidratos`.
+
+📌 **Desvios padrão e precisão esperada** são calculados para indicar confiabilidade das análises,
+com destaque para variações fora do intervalo considerado confiável (±10%).
+
+As correções são realizadas por modelos de Regressão Linear, Árvore de Decisão e Rede Neural (MLP),
+com escolha automática do modelo de melhor desempenho (maior R²).
+""")
 
 alvo_file = st.file_uploader("📂 Arquivo com os dados a corrigir:", type="csv")
 ref_file = st.file_uploader("📘 Base de referência com *_ref:", type="csv")
@@ -25,11 +35,10 @@ if alvo_file and ref_file:
     col_corrigido = [c + "_corr" for c in col_base + ["carboidratos"]]
 
     for df in [df_alvo, df_ref]:
-        required = col_base
-        if all(col in df.columns for col in required):
-            df["carboidratos"] = 100 - df[required].sum(axis=1)
+        if all(col in df.columns for col in col_base):
+            df["carboidratos"] = 100 - df[col_base].sum(axis=1)
         else:
-            st.error(f"❌ Faltam colunas obrigatórias: {', '.join(required)}.")
+            st.error(f"❌ Faltam colunas obrigatórias: {', '.join(col_base)}.")
             st.stop()
 
     for col in col_base + ["carboidratos"]:
@@ -44,7 +53,7 @@ if alvo_file and ref_file:
         df_resultado = df_alvo.copy()
         resultados = {}
 
-        # Regressão Linear
+        # Modelos
         lr = LinearRegression().fit(X_ref, y_ref)
         dt = DecisionTreeRegressor(random_state=0).fit(X_ref, y_ref)
         scalerX, scalerY = StandardScaler().fit(X_ref), StandardScaler().fit(y_ref)
@@ -76,32 +85,32 @@ if alvo_file and ref_file:
         for c in col_base + ["carboidratos"]:
             df_final[c + "_var_%"] = ((df_final[c + "_corr"] - df_final[c]) / df_final[c]) * 100
 
-        # Tabelas separadas
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📂 Dados Originais")
-            st.dataframe(df_alvo)
-        with col2:
-            st.subheader("📘 Base de Referência")
-            st.dataframe(df_ref)
+        # Tabelas
+        st.subheader("📂 Dados Originais")
+        st.dataframe(df_alvo)
+
+        st.subheader("📘 Base de Referência")
+        st.dataframe(df_ref)
 
         st.subheader("✅ Dados Corrigidos")
         st.dataframe(df_corrigido)
 
-        # Estatísticas
-        st.subheader("📊 Comparação Estatística")
+        st.subheader("📊 Estatísticas de Validação Científica")
         estat = pd.DataFrame()
         for col in col_base + ["carboidratos"]:
             estat.loc[col, "Média Original"] = df_final[col].mean()
             estat.loc[col, "Média Corrigida"] = df_final[col + "_corr"].mean()
             estat.loc[col, "Desvio (%)"] = ((estat.loc[col, "Média Corrigida"] - estat.loc[col, "Média Original"]) / estat.loc[col, "Média Original"]) * 100
+            estat.loc[col, "Desvio Padrão Corrigido"] = df_final[col + "_corr"].std()
+            estat.loc[col, "Erro Quadrático Médio (MSE)"] = mean_squared_error(df_final[col], df_final[col + "_corr"])
+            estat.loc[col, "Erro Absoluto Médio (MAE)"] = mean_absolute_error(df_final[col], df_final[col + "_corr"])
 
         def cor_valor(val):
             return "background-color: lightgreen" if -10 <= val <= 10 else "background-color: tomato"
 
-        st.dataframe(estat.style.applymap(cor_valor, subset=["Desvio (%)"]).format("{:.2f}"))
+        st.dataframe(estat.style.applymap(cor_valor, subset=["Desvio (%)"]).format("{:.3f}"))
 
-        st.download_button("⬇️ Baixar Resultado Final", df_final.to_csv(index=False), file_name="resultado_completo_com_fibras.csv")
+        st.download_button("⬇️ Baixar Resultado Final", df_final.to_csv(index=False), file_name="resultado_validacao_cientifica.csv")
 
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
