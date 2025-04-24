@@ -10,7 +10,7 @@ from sklearn.metrics import r2_score, mean_absolute_error
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🔬 Validador IA – Composição Proximal (Umidade, Cinzas, Proteínas, Lipídeos, Carboidratos)")
+st.title("🔬 Validador IA – Composição Proximal com Análise Estatística")
 
 st.markdown("Envie os **dados a corrigir** e a **base de referência** contendo os valores padrão.")
 
@@ -23,23 +23,19 @@ if alvo_file and ref_file:
 
     col_base = ["umidade", "proteina", "cinzas", "lipideos"]
     col_corrigido = ["umidade_corr", "proteina_corr", "cinzas_corr", "lipideos_corr", "carboidratos_corr"]
-    col_y = ["umidade_ref", "proteina_ref", "cinzas_ref", "lipideos_ref", "carboidratos_ref"]
 
-    # Verifica se as colunas existem e calcula carboidratos
     for df in [df_alvo, df_ref]:
-        required_cols = ["umidade", "proteina", "cinzas", "lipideos"]
-        if all(col in df.columns for col in required_cols):
+        required = col_base
+        if all(col in df.columns for col in required):
             if "carboidratos" not in df.columns:
                 df["carboidratos"] = 100 - (df["umidade"] + df["proteina"] + df["cinzas"] + df["lipideos"])
         else:
-            st.error(f"❌ Arquivo está incompleto. As colunas obrigatórias são: {', '.join(required_cols)}.")
+            st.error(f"❌ Faltam colunas obrigatórias: {', '.join(required)}.")
             st.stop()
 
-    # Gerar colunas *_ref se não existirem
-    for base_col in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]:
-        ref_col = base_col + "_ref"
-        if ref_col not in df_ref.columns:
-            df_ref[ref_col] = df_ref[base_col]
+    for col in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]:
+        if col + "_ref" not in df_ref.columns:
+            df_ref[col + "_ref"] = df_ref[col]
 
     try:
         X_ref = df_ref[["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]]
@@ -49,71 +45,64 @@ if alvo_file and ref_file:
         df_resultado = df_alvo.copy()
         resultados = {}
 
-        # Regressão Linear
+        # Modelos
         lr = LinearRegression().fit(X_ref, y_ref)
-        y_lr = lr.predict(X_alvo)
-        resultados["Regressão Linear"] = {
-            "modelo": lr,
-            "y_pred": y_lr,
-            "R²": r2_score(y_ref, lr.predict(X_ref)),
-            "MAE": mean_absolute_error(y_ref, lr.predict(X_ref))
-        }
-
-        # Árvore de Decisão
         dt = DecisionTreeRegressor(random_state=0).fit(X_ref, y_ref)
-        y_dt = dt.predict(X_alvo)
-        resultados["Árvore de Decisão"] = {
-            "modelo": dt,
-            "y_pred": y_dt,
-            "R²": r2_score(y_ref, dt.predict(X_ref)),
-            "MAE": mean_absolute_error(y_ref, dt.predict(X_ref))
-        }
-
-        # Rede Neural MLP
-        scalerX = StandardScaler().fit(X_ref)
-        scalerY = StandardScaler().fit(y_ref)
+        scalerX, scalerY = StandardScaler().fit(X_ref), StandardScaler().fit(y_ref)
         mlp = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=0, early_stopping=True)
         mlp.fit(scalerX.transform(X_ref), scalerY.transform(y_ref))
-        y_mlp = scalerY.inverse_transform(mlp.predict(scalerX.transform(X_alvo)))
-        resultados["Rede Neural (MLP)"] = {
-            "modelo": mlp,
-            "y_pred": y_mlp,
-            "R²": r2_score(y_ref, scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref)))),
-            "MAE": mean_absolute_error(y_ref, scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref))))
+
+        y_preds = {
+            "Regressão Linear": lr.predict(X_alvo),
+            "Árvore de Decisão": dt.predict(X_alvo),
+            "Rede Neural (MLP)": scalerY.inverse_transform(mlp.predict(scalerX.transform(X_alvo)))
         }
 
-        melhor_modelo = max(resultados, key=lambda m: resultados[m]["R²"])
-        st.success(f"🏆 Melhor modelo com base no R²: **{melhor_modelo}**")
+        scores = {
+            nome: r2_score(y_ref, pred)
+            for nome, pred in {
+                "Regressão Linear": lr.predict(X_ref),
+                "Árvore de Decisão": dt.predict(X_ref),
+                "Rede Neural (MLP)": scalerY.inverse_transform(mlp.predict(scalerX.transform(X_ref)))
+            }.items()
+        }
 
-        y_corrigido = resultados[melhor_modelo]["y_pred"]
-        y_corrigido_df = pd.DataFrame(y_corrigido, columns=col_corrigido)
-        df_resultado = pd.concat([df_resultado, y_corrigido_df], axis=1)
+        melhor = max(scores, key=scores.get)
+        st.success(f"🏆 Melhor modelo: {melhor}")
+        y_corrigido = y_preds[melhor]
 
-        # Variação percentual e zscore
+        df_corrigido = pd.DataFrame(y_corrigido, columns=col_corrigido)
+        df_final = pd.concat([df_alvo, df_corrigido], axis=1)
+
+        for c in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]:
+            df_final[c + "_var_%"] = ((df_final[c + "_corr"] - df_final[c]) / df_final[c]) * 100
+
+        # Tabelas separadas
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📂 Dados Originais")
+            st.dataframe(df_alvo)
+        with col2:
+            st.subheader("📘 Base de Referência")
+            st.dataframe(df_ref)
+
+        st.subheader("✅ Dados Corrigidos")
+        st.dataframe(df_corrigido)
+
+        # Estatísticas
+        st.subheader("📊 Comparação Estatística")
+        estat = pd.DataFrame()
         for col in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]:
-            col_corr = col + "_corr"
-            df_resultado[col + "_var_%"] = ((df_resultado[col_corr] - df_resultado[col]) / df_resultado[col]) * 100
-            df_resultado[col + "_zscore"] = np.abs((df_resultado[col + "_var_%"] - df_resultado[col + "_var_%"].mean()) / df_resultado[col + "_var_%"].std())
+            estat.loc[col, "Média Original"] = df_final[col].mean()
+            estat.loc[col, "Média Corrigida"] = df_final[col + "_corr"].mean()
+            estat.loc[col, "Desvio (%)"] = ((estat.loc[col, "Média Corrigida"] - estat.loc[col, "Média Original"]) / estat.loc[col, "Média Original"]) * 100
 
-        st.dataframe(df_resultado.style.highlight_between(
-            subset=[c+"_zscore" for c in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]],
-            left=2, right=100, color='tomato'))
+        def cor_valor(val):
+            return "background-color: lightgreen" if -10 <= val <= 10 else "background-color: tomato"
 
-        st.markdown("### 📈 Gráficos Comparativos")
-        for col in ["umidade", "proteina", "cinzas", "lipideos", "carboidratos"]:
-            fig = px.scatter(df_resultado, x=col, y=col + "_corr", title=f"Correção de {col.capitalize()}",
-                             labels={col: "Original", col + "_corr": "Corrigido"})
-            st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(estat.style.applymap(cor_valor, subset=["Desvio (%)"]).format("{:.2f}"))
 
-        st.markdown("### 📊 Desempenho dos Modelos")
-        st.table(pd.DataFrame({
-            modelo: {
-                "R²": f"{res['R²']:.3f}",
-                "MAE": f"{res['MAE']:.3f}"
-            } for modelo, res in resultados.items()
-        }).T)
-
-        st.download_button("⬇️ Baixar resultado corrigido", df_resultado.to_csv(index=False), file_name="resultado_corrigido_proximal.csv")
+        st.download_button("⬇️ Baixar Resultado Final", df_final.to_csv(index=False), file_name="resultado_completo.csv")
 
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
